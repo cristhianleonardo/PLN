@@ -217,3 +217,136 @@ gramatica = {
 
 # El léxico actúa como reglas terminales de la CFG.
 # Det, N, V, Adj son categorías; las palabras viven en `lexico`.
+
+
+# ============================================================
+# PARTE 5: Parser descendente recursivo  (commit 3)
+#
+# Clase Nodo igual a la de arbol_desde_cero.py de la profe.
+# parse_sn / parse_sv / parse_o recorren los tokens buscando
+# sintagmas válidos y construyen el árbol de derivación.
+# ============================================================
+
+class Nodo:
+    """Nodo del árbol de derivación (igual que en arbol_desde_cero.py)."""
+    def __init__(self, etiqueta, hijos=None, es_error=False):
+        self.etiqueta = etiqueta
+        self.hijos    = hijos if hijos else []
+        self.es_error = es_error
+
+
+def parse_sn(tokens, pos):
+    """
+    SN → Det N Adj*  |  N Adj*
+    Retorna (nodo_SN, dag_concordancia, nueva_pos) o (None, None, pos).
+    """
+    if pos >= len(tokens):
+        return None, None, pos
+
+    nodo_sn   = Nodo('SN')
+    dag_sn    = {}
+    pos_act   = pos
+    det_info  = None
+    sust_info = None
+
+    # ── Intento Det N ──────────────────────────────────────
+    r = rasgo(tokens[pos_act])
+    if r and r['cat'] == 'det':
+        det_tok  = tokens[pos_act]
+        det_info = r
+        nodo_det = Nodo('Det')
+        nodo_det.hijos.append(Nodo(f'"{det_tok}"'))
+        pos_act += 1
+
+        if pos_act < len(tokens):
+            r2 = rasgo(tokens[pos_act])
+            if r2 and r2['cat'] == 'n':
+                sust_tok  = tokens[pos_act]
+                sust_info = r2
+                nodo_n    = Nodo('N')
+                nodo_n.hijos.append(Nodo(f'"{sust_tok}"'))
+                pos_act  += 1
+                nodo_sn.hijos.extend([nodo_det, nodo_n])
+                dag_sn = {'det': det_tok, 'n': sust_tok,
+                          'gen': sust_info['gen'], 'num': sust_info['num']}
+
+    # ── Intento N solo ──────────────────────────────────────
+    if not dag_sn:
+        pos_act = pos
+        r = rasgo(tokens[pos_act])
+        if r and r['cat'] == 'n':
+            sust_tok  = tokens[pos_act]
+            sust_info = r
+            nodo_n    = Nodo('N')
+            nodo_n.hijos.append(Nodo(f'"{sust_tok}"'))
+            pos_act  += 1
+            nodo_sn.hijos.append(nodo_n)
+            dag_sn = {'n': sust_tok,
+                      'gen': sust_info['gen'], 'num': sust_info['num']}
+
+    if not dag_sn:
+        return None, None, pos
+
+    # ── Adjetivos opcionales ────────────────────────────────
+    dag_sn['adjs'] = []
+    while pos_act < len(tokens):
+        r = rasgo(tokens[pos_act])
+        if r and r['cat'] == 'adj':
+            adj_tok = tokens[pos_act]
+            dag_sn['adjs'].append({'palabra': adj_tok, 'rasgos': r})
+            nodo_adj = Nodo('Adj')
+            nodo_adj.hijos.append(Nodo(f'"{adj_tok}"'))
+            nodo_sn.hijos.append(nodo_adj)
+            pos_act += 1
+        else:
+            break
+
+    dag_sn['det_info']  = det_info
+    dag_sn['sust_info'] = sust_info
+    return nodo_sn, dag_sn, pos_act
+
+
+def parse_sv(tokens, pos):
+    """SV → V SN | V"""
+    if pos >= len(tokens):
+        return None, None, pos
+
+    r = rasgo(tokens[pos])
+    if not r or r['cat'] != 'v':
+        return None, None, pos
+
+    v_tok   = tokens[pos]
+    nodo_sv = Nodo('SV')
+    nodo_v  = Nodo('V')
+    nodo_v.hijos.append(Nodo(f'"{v_tok}"'))
+    nodo_sv.hijos.append(nodo_v)
+    dag_sv  = {'v': v_tok, 'num': r['num'], 'accion': r['accion']}
+    pos_act = pos + 1
+
+    nodo_sn_obj, dag_obj, pos2 = parse_sn(tokens, pos_act)
+    if nodo_sn_obj:
+        nodo_sv.hijos.append(nodo_sn_obj)
+        dag_sv['objeto'] = dag_obj
+        pos_act = pos2
+
+    return nodo_sv, dag_sv, pos_act
+
+
+def parse_o(tokens):
+    """O → SN SV | SN"""
+    nodo_o   = Nodo('O')
+    nodo_sn, dag_sn, pos = parse_sn(tokens, 0)
+    if not nodo_sn:
+        return None, [], None
+
+    nodo_sv, dag_sv, pos = parse_sv(tokens, pos)
+
+    nodo_o.hijos.append(nodo_sn)
+    sintagmas = [dag_sn]
+
+    if nodo_sv:
+        nodo_o.hijos.append(nodo_sv)
+        if dag_sv and 'objeto' in dag_sv:
+            sintagmas.append(dag_sv['objeto'])
+
+    return nodo_o, sintagmas, dag_sv
