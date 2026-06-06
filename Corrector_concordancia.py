@@ -9,6 +9,12 @@
 # COMMIT 1 — Léxico con DAGs + función unificar
 # ============================================================
 
+import re
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+
 # ============================================================
 # PARTE 1: Léxico con estructuras de rasgos (DAGs)
 # ============================================================
@@ -350,3 +356,237 @@ def parse_o(tokens):
             sintagmas.append(dag_sv['objeto'])
 
     return nodo_o, sintagmas, dag_sv
+
+# ============================================================
+# PARTE 6: Verificación de errores + sugerencias  
+# ============================================================
+
+def sugerir_det(gen_sust, num_sust):
+    g = gen_sust if gen_sust != 'neutro' else 'masc'
+    return formas_det.get(g, {}).get(num_sust, '?')
+
+def sugerir_adj(base, gen_sust, num_sust):
+    g = gen_sust if gen_sust != 'neutro' else 'masc'
+    return formas_adj.get(base, {}).get(g, {}).get(num_sust, f'{base}(?)')
+
+
+def concordancia_det_n(det_info, sust_info):
+    dag_det  = {'gen': det_info['gen'], 'num': det_info['num']}
+    dag_sust = {'gen': sust_info['gen'], 'num': sust_info['num']}
+    if dag_det['gen'] == 'neutro':   dag_det['gen']  = dag_sust['gen']
+    if dag_sust['gen'] == 'neutro':  dag_sust['gen'] = dag_det['gen']
+    return unificar(dag_det, dag_sust)
+
+
+def concordancia_adj_n(adj_info, sust_info):
+    dag_adj  = {'gen': adj_info['gen'], 'num': adj_info['num']}
+    dag_sust = {'gen': sust_info['gen'], 'num': sust_info['num']}
+    if dag_adj['gen'] == 'neutro':   dag_adj['gen']  = dag_sust['gen']
+    if dag_sust['gen'] == 'neutro':  dag_sust['gen'] = dag_adj['gen']
+    return unificar(dag_adj, dag_sust)
+
+
+def verificar_sintagma(dag_sn):
+    errores       = []
+    unificaciones = []
+    sust_info = dag_sn.get('sust_info')
+    det_info  = dag_sn.get('det_info')
+    adjs      = dag_sn.get('adjs', [])
+
+    if not sust_info:
+        return errores, unificaciones
+
+    # Det ↔ N
+    if det_info:
+        resultado = concordancia_det_n(det_info, sust_info)
+        gen_ok = (det_info['gen'] == sust_info['gen']
+                  or 'neutro' in (det_info['gen'], sust_info['gen']))
+        num_ok = (det_info['num'] == sust_info['num'])
+        unificaciones.append({
+            'par':    f"{dag_sn.get('det','?')} ↔ {dag_sn.get('n','?')}",
+            'tipo':   'Det–N',
+            'dag1':   {'gen': det_info['gen'],  'num': det_info['num']},
+            'dag2':   {'gen': sust_info['gen'], 'num': sust_info['num']},
+            'gen_ok': gen_ok, 'num_ok': num_ok,
+            'unifica': resultado is not None,
+        })
+        if resultado is None:
+            if not gen_ok:
+                correcto = sugerir_det(sust_info['gen'], sust_info['num'])
+                errores.append({
+                    'tipo': 'GÉNERO', 'token': dag_sn.get('det', '?'),
+                    'desc': (f"'{dag_sn['det']}' es {det_info['gen']} "
+                             f"pero '{dag_sn['n']}' es {sust_info['gen']}"),
+                    'sug':  f"Cambiar '{dag_sn['det']}' → '{correcto}'",
+                })
+            if not num_ok:
+                correcto = sugerir_det(sust_info['gen'], sust_info['num'])
+                errores.append({
+                    'tipo': 'NÚMERO', 'token': dag_sn.get('det', '?'),
+                    'desc': (f"'{dag_sn['det']}' es {det_info['num']} "
+                             f"pero '{dag_sn['n']}' es {sust_info['num']}"),
+                    'sug':  f"Cambiar '{dag_sn['det']}' → '{correcto}'",
+                })
+
+    # Adj ↔ N
+    for adj_entry in adjs:
+        adj_tok  = adj_entry['palabra']
+        adj_info = adj_entry['rasgos']
+        resultado = concordancia_adj_n(adj_info, sust_info)
+        gen_ok = (adj_info['gen'] == sust_info['gen']
+                  or 'neutro' in (adj_info['gen'], sust_info['gen']))
+        num_ok = (adj_info['num'] == sust_info['num'])
+        unificaciones.append({
+            'par':    f"{adj_tok} ↔ {dag_sn.get('n','?')}",
+            'tipo':   'Adj–N',
+            'dag1':   {'gen': adj_info['gen'],  'num': adj_info['num']},
+            'dag2':   {'gen': sust_info['gen'], 'num': sust_info['num']},
+            'gen_ok': gen_ok, 'num_ok': num_ok,
+            'unifica': resultado is not None,
+        })
+        if resultado is None:
+            base = adj_info.get('base', adj_tok)
+            if not gen_ok:
+                correcto = sugerir_adj(base, sust_info['gen'], sust_info['num'])
+                errores.append({
+                    'tipo': 'GÉNERO', 'token': adj_tok,
+                    'desc': (f"'{adj_tok}' es {adj_info['gen']} "
+                             f"pero '{dag_sn['n']}' es {sust_info['gen']}"),
+                    'sug':  f"Cambiar '{adj_tok}' → '{correcto}'",
+                })
+            if not num_ok:
+                correcto = sugerir_adj(base, sust_info['gen'], sust_info['num'])
+                errores.append({
+                    'tipo': 'NÚMERO', 'token': adj_tok,
+                    'desc': (f"'{adj_tok}' es {adj_info['num']} "
+                             f"pero '{dag_sn['n']}' es {sust_info['num']}"),
+                    'sug':  f"Cambiar '{adj_tok}' → '{correcto}'",
+                })
+
+    return errores, unificaciones
+
+
+# ============================================================
+# PARTE 7: Árbol de derivación con matplotlib 
+# ============================================================
+
+def _medir_ancho(nodo):
+    if not nodo.hijos:
+        return 1
+    return sum(_medir_ancho(h) for h in nodo.hijos)
+
+
+def dibujar_arbol(nodo, ax, x, y, ancho):
+    if not isinstance(nodo, Nodo):
+        ax.text(x, y, str(nodo), ha='center', va='center', fontsize=9,
+                bbox=dict(boxstyle='round', facecolor='lightgreen', alpha=0.9))
+        return
+    color = '#ffaaaa' if nodo.es_error else 'lightblue'
+    ax.text(x, y, nodo.etiqueta, ha='center', va='center', fontsize=10,
+            fontweight='bold',
+            bbox=dict(boxstyle='round', facecolor=color, alpha=0.9, edgecolor='gray'))
+    if not nodo.hijos:
+        return
+    n     = len(nodo.hijos)
+    x_ini = x - ancho / 2
+    for hijo in nodo.hijos:
+        ancho_hijo = ancho / n
+        x_hijo     = x_ini + ancho_hijo / 2
+        y_hijo     = y - 1.2
+        ax.plot([x, x_hijo], [y - 0.2, y_hijo + 0.2], 'k-', lw=1.2)
+        dibujar_arbol(hijo, ax, x_hijo, y_hijo, ancho_hijo)
+        x_ini += ancho_hijo
+
+
+def marcar_errores_arbol(nodo, tokens_error):
+    for hijo in nodo.hijos:
+        marcar_errores_arbol(hijo, tokens_error)
+    etiq = nodo.etiqueta.strip('"')
+    if etiq in tokens_error:
+        nodo.es_error = True
+    if any(h.es_error for h in nodo.hijos):
+        nodo.es_error = True
+
+
+def guardar_arbol(nodo_raiz, frase, nombre_archivo='arbol_derivacion.png'):
+    ancho_total = max(_medir_ancho(nodo_raiz) * 1.5, 6)
+    fig, ax = plt.subplots(figsize=(ancho_total + 2, 6))
+    ax.set_xlim(0, ancho_total)
+    ax.set_ylim(0, 6)
+    ax.axis('off')
+    dibujar_arbol(nodo_raiz, ax, ancho_total / 2, 5.5, ancho_total)
+    parche_ok  = mpatches.Patch(color='lightblue', label='Correcto')
+    parche_err = mpatches.Patch(color='#ffaaaa',   label='Error de concordancia')
+    ax.legend(handles=[parche_ok, parche_err], loc='lower right', fontsize=8)
+    plt.title(f'Árbol de Derivación — "{frase}"', fontsize=11, pad=10)
+    plt.tight_layout()
+    plt.savefig(nombre_archivo, dpi=120, bbox_inches='tight')
+    plt.close()
+    return nombre_archivo
+
+
+# ── Prueba ────────────────────────────────────────────────
+if __name__ == '__main__':
+    dfa = DFA()
+
+    frases = [
+        'La niña alto corre',
+        'Los perro negro ladra',
+        'El gato gris duerme',
+    ]
+
+    for frase in frases:
+        sep = '=' * 55
+        print(f'\n{sep}')
+        print(f'  Frase: "{frase}"')
+        print(sep)
+
+        tokens = dfa.tokenizar(frase)
+        nodo_raiz, sintagmas, dag_sv = parse_o(tokens)
+
+        if not sintagmas:
+            print('  No se reconocieron sintagmas.')
+            continue
+
+        # Unificación
+        todos_errores = []
+        tokens_error  = set()
+        for sn in sintagmas:
+            errores, unifs = verificar_sintagma(sn)
+            todos_errores.extend(errores)
+            for e in errores:
+                tokens_error.add(e['token'])
+            for u in unifs:
+                estado = 'OK' if u['unifica'] else 'FALLA'
+                print(f"  {u['par']:<20} {u['tipo']:<8} gen={'✓' if u['gen_ok'] else '✗'}  num={'✓' if u['num_ok'] else '✗'}  {estado}")
+
+        # Árbol ASCII
+        def ascii_arbol(nodo, prefijo='', es_ult=True):
+            conn  = '└── ' if es_ult else '├── '
+            marca = ' ← ERROR' if nodo.es_error else ''
+            print(prefijo + (conn if prefijo else '') + nodo.etiqueta + marca)
+            nuevo = prefijo + ('    ' if es_ult else '│   ')
+            for i, h in enumerate(nodo.hijos):
+                ascii_arbol(h, nuevo, i == len(nodo.hijos) - 1)
+
+        if nodo_raiz:
+            marcar_errores_arbol(nodo_raiz, tokens_error)
+            print()
+            ascii_arbol(nodo_raiz)
+
+        # Resultado
+        print()
+        if not todos_errores:
+            print('  ✓ Frase válida — concordancia correcta.')
+            if dag_sv:
+                sujeto = ' '.join(filter(None, [sintagmas[0].get('det'), sintagmas[0].get('n')]))
+                print(f'  → Sujeto: "{sujeto}"  |  Acción: "{dag_sv["accion"]}"')
+        else:
+            for i, err in enumerate(todos_errores, 1):
+                print(f'  Error {i} [{err["tipo"]}]: {err["desc"]}')
+                print(f'    ✦ {err["sug"]}')
+
+        # Guardar árbol PNG
+        if nodo_raiz:
+            archivo = guardar_arbol(nodo_raiz, frase)
+            print(f'\n  Árbol guardado: {archivo}')
