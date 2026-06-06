@@ -157,17 +157,63 @@ def unificar(dag1, dag2):
     return resultado
 
 
-# ── Prueba básica ──────────────────────────────────────────
-if __name__ == '__main__':
-    print('=== Léxico — prueba de acceso ===')
-    for palabra in ['la', 'niña', 'alto', 'gris', 'corre']:
-        r = rasgo(palabra)
-        print(f'  {palabra:<10} → {r}')
+# ============================================================
+# PARTE 3: Autómata Finito Determinista (DFA) — tokenización
+#
+# Estados: q0=INICIO  q1=EN_PALABRA  q2=SEPARADOR
+# Transición δ(estado, caracter) definida en _delta()
+# ============================================================
 
-    print('\n=== Unificación — prueba básica ===')
-    d1 = {'gen': 'fem', 'num': 'sing'}
-    d2 = {'gen': 'fem', 'num': 'sing'}
-    print(f'  fem/sing ↔ fem/sing  → {unificar(d1, d2)}')
+class DFA:
+    """
+    DFA que tokeniza una frase carácter a carácter.
+    Cada vez que transita q1→q2 emite el token acumulado.
+    """
 
-    d3 = {'gen': 'masc', 'num': 'sing'}
-    print(f'  masc/sing ↔ fem/sing → {unificar(d3, d2)}')
+    ESTADO_INICIAL = 'q0'
+
+    def _es_letra(self, c):
+        return c.isalpha() or c in 'áéíóúüñÁÉÍÓÚÜÑ'
+
+    def _delta(self, estado, c):
+        """Función de transición del DFA."""
+        if estado == 'q0':
+            return 'q1' if self._es_letra(c) else 'q2'
+        if estado == 'q1':
+            return 'q1' if self._es_letra(c) else 'q2'
+        if estado == 'q2':
+            return 'q1' if self._es_letra(c) else 'q2'
+        return 'q2'
+
+    def tokenizar(self, frase):
+        estado  = self.ESTADO_INICIAL
+        buffer  = ''
+        tokens  = []
+
+        for c in frase:
+            nuevo = self._delta(estado, c)
+            if estado == 'q1' and nuevo == 'q2':   # fin de palabra
+                tokens.append(buffer.lower())
+                buffer = ''
+            if nuevo == 'q1':
+                buffer += c
+            estado = nuevo
+
+        if buffer:                                  # último token
+            tokens.append(buffer.lower())
+
+        return tokens
+
+
+# ============================================================
+# PARTE 4: Gramática de Contexto Libre (CFG)
+# ============================================================
+
+gramatica = {
+    'O':  [['SN', 'SV'], ['SN']],
+    'SN': [['Det', 'N'], ['N']],
+    'SV': [['V', 'SN'],  ['V']],
+}
+
+# El léxico actúa como reglas terminales de la CFG.
+# Det, N, V, Adj son categorías; las palabras viven en `lexico`.
