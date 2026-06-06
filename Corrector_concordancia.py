@@ -525,42 +525,151 @@ def guardar_arbol(nodo_raiz, frase, nombre_archivo='arbol_derivacion.png'):
     return nombre_archivo
 
 
-# ── Prueba ────────────────────────────────────────────────
-if __name__ == '__main__':
-    dfa = DFA()
+# ============================================================
+# PARTE 8: Detección de ambigüedad léxica  (commit 5)
+#
+# Una palabra es ambigua cuando puede funcionar como N o Adj
+# según el contexto. El sistema la detecta, reporta las
+# interpretaciones posibles y señala cuál usó el parser.
+# ============================================================
 
-    frases = [
-        'La niña alto corre',
-        'Los perro negro ladra',
-        'El gato gris duerme',
-    ]
+def detectar_ambiguedad(tokens):
+    """
+    Recorre los tokens y reporta los que tienen más de una
+    interpretación en el léxico (lexico_ambiguo).
+    Retorna lista de dicts con la palabra y sus lecturas.
+    """
+    ambiguos = []
+    for tok in tokens:
+        interpretaciones = rasgo_ambiguo(tok)
+        if interpretaciones:
+            ambiguos.append({
+                'palabra':         tok,
+                'interpretaciones': interpretaciones,
+            })
+    return ambiguos
 
-    for frase in frases:
-        sep = '=' * 55
-        print(f'\n{sep}')
-        print(f'  Frase: "{frase}"')
-        print(sep)
 
-        tokens = dfa.tokenizar(frase)
-        nodo_raiz, sintagmas, dag_sv = parse_o(tokens)
+def reportar_ambiguedad(tokens):
+    """
+    Imprime el reporte de ambigüedad para los tokens de la frase.
+    Si no hay palabras ambiguas lo indica también.
+    """
+    ambiguos = detectar_ambiguedad(tokens)
+    if not ambiguos:
+        print('  Sin ambigüedad léxica detectada.')
+        return
 
-        if not sintagmas:
-            print('  No se reconocieron sintagmas.')
-            continue
+    for a in ambiguos:
+        print(f"  ⚠  '{a['palabra']}' es ambigua — {len(a['interpretaciones'])} lecturas posibles:")
+        for i, interp in enumerate(a['interpretaciones'], 1):
+            cat  = interp['cat']
+            gen  = interp.get('gen', '—')
+            num  = interp.get('num', '—')
+            rol  = 'sustantivo' if cat == 'n' else 'adjetivo' if cat == 'adj' else cat
+            print(f"      {i}. cat={cat} ({rol})  gen={gen}  num={num}")
+        print(f"     → El parser la usó como: "
+              f"{'sustantivo' if rasgo(a['palabra']) and rasgo(a['palabra'])['cat']=='n' else 'adjetivo (o desconocida en léxico principal)'}")
 
-        # Unificación
-        todos_errores = []
-        tokens_error  = set()
-        for sn in sintagmas:
-            errores, unifs = verificar_sintagma(sn)
-            todos_errores.extend(errores)
-            for e in errores:
-                tokens_error.add(e['token'])
-            for u in unifs:
-                estado = 'OK' if u['unifica'] else 'FALLA'
-                print(f"  {u['par']:<20} {u['tipo']:<8} gen={'✓' if u['gen_ok'] else '✗'}  num={'✓' if u['num_ok'] else '✗'}  {estado}")
 
-        # Árbol ASCII
+# ============================================================
+# PARTE 9: Función principal de análisis
+# ============================================================
+
+def analizar(frase, guardar_img=True):
+    sep  = '=' * 60
+    sep2 = '-' * 60
+
+    print(f'\n{sep}')
+    print(f'  CORRECTOR DE CONCORDANCIA — PLN 2026-1')
+    print(sep)
+    print(f'  Frase: "{frase}"')
+    print(sep2)
+
+    # ── 1. DFA: tokenización ─────────────────────────────
+    print('\n[1] TOKENIZACIÓN (DFA)')
+    print(sep2)
+    dfa    = DFA()
+    tokens = dfa.tokenizar(frase)
+
+    desconocidos = []
+    for tok in tokens:
+        r = rasgo(tok)
+        if r:
+            print(f'  {tok:<12}  →  cat={r["cat"]}', end='')
+            if 'gen' in r: print(f'  gen={r["gen"]}', end='')
+            if 'num' in r: print(f'  num={r["num"]}', end='')
+            print()
+        else:
+            # puede ser ambigua
+            interps = rasgo_ambiguo(tok)
+            if interps:
+                cats = '/'.join(set(i['cat'] for i in interps))
+                print(f'  {tok:<12}  →  cat={cats} (AMBIGUA)')
+            else:
+                print(f'  {tok:<12}  →  DESCONOCIDO')
+                desconocidos.append(tok)
+
+    if desconocidos:
+        print(f'\n  ⚠  No reconocidas: {", ".join(desconocidos)}')
+
+    # ── 2. CFG + Parser: sintagmas nominales ─────────────
+    print(f'\n[2] PARSER — SINTAGMAS NOMINALES (CFG)')
+    print(sep2)
+    nodo_raiz, sintagmas, dag_sv = parse_o(tokens)
+
+    if not sintagmas:
+        print('  No se detectaron sintagmas nominales reconocibles.')
+        return
+
+    for i, sn in enumerate(sintagmas, 1):
+        partes = []
+        if sn.get('det'):   partes.append(f"Det:'{sn['det']}'")
+        if sn.get('n'):     partes.append(f"N:'{sn['n']}'")
+        for a in sn.get('adjs', []):
+            partes.append(f"Adj:'{a['palabra']}'")
+        print(f'  SN{i}: [ {" | ".join(partes)} ]')
+
+    # ── 3. DCG / Unificación ─────────────────────────────
+    print(f'\n[3] UNIFICACIÓN DE RASGOS (DCG / DAGs)')
+    print(sep2)
+    print(f'  {"Par":<22} {"Tipo":<10} {"DAG1":<22} {"DAG2":<22} {"Gen":>5} {"Num":>5} {"Estado"}')
+    print(f'  {"-"*22} {"-"*10} {"-"*22} {"-"*22} {"-"*5} {"-"*5} {"-"*8}')
+
+    todos_errores = []
+    todas_unifs   = []
+    tokens_error  = set()
+
+    for sn in sintagmas:
+        errores, unifs = verificar_sintagma(sn)
+        todos_errores.extend(errores)
+        todas_unifs.extend(unifs)
+        for e in errores:
+            tokens_error.add(e['token'])
+
+    for u in todas_unifs:
+        gen_s  = '✓' if u['gen_ok'] else '✗'
+        num_s  = '✓' if u['num_ok'] else '✗'
+        estado = 'OK' if u['unifica'] else 'FALLA'
+        dag1_s = str(u['dag1'])
+        dag2_s = str(u['dag2'])
+        print(f'  {u["par"]:<22} {u["tipo"]:<10} {dag1_s:<22} {dag2_s:<22} {gen_s:>5} {num_s:>5} {estado}')
+
+    # ── 4. Ambigüedad léxica ──────────────────────────────
+    print(f'\n[4] AMBIGÜEDAD LÉXICA')
+    print(sep2)
+    reportar_ambiguedad(tokens)
+
+    # ── 5. Árbol de derivación ────────────────────────────
+    if nodo_raiz:
+        print(f'\n[5] ÁRBOL DE DERIVACIÓN (matplotlib)')
+        print(sep2)
+        marcar_errores_arbol(nodo_raiz, tokens_error)
+
+        if guardar_img:
+            archivo = guardar_arbol(nodo_raiz, frase)
+            print(f'  Árbol guardado en: {archivo}')
+
         def ascii_arbol(nodo, prefijo='', es_ult=True):
             conn  = '└── ' if es_ult else '├── '
             marca = ' ← ERROR' if nodo.es_error else ''
@@ -569,24 +678,101 @@ if __name__ == '__main__':
             for i, h in enumerate(nodo.hijos):
                 ascii_arbol(h, nuevo, i == len(nodo.hijos) - 1)
 
-        if nodo_raiz:
-            marcar_errores_arbol(nodo_raiz, tokens_error)
-            print()
-            ascii_arbol(nodo_raiz)
+        ascii_arbol(nodo_raiz)
 
-        # Resultado
-        print()
-        if not todos_errores:
-            print('  ✓ Frase válida — concordancia correcta.')
-            if dag_sv:
-                sujeto = ' '.join(filter(None, [sintagmas[0].get('det'), sintagmas[0].get('n')]))
-                print(f'  → Sujeto: "{sujeto}"  |  Acción: "{dag_sv["accion"]}"')
-        else:
-            for i, err in enumerate(todos_errores, 1):
-                print(f'  Error {i} [{err["tipo"]}]: {err["desc"]}')
-                print(f'    ✦ {err["sug"]}')
+    # ── 6. Resultado final ────────────────────────────────
+    print(f'\n[6] RESULTADO')
+    print(sep2)
 
-        # Guardar árbol PNG
-        if nodo_raiz:
-            archivo = guardar_arbol(nodo_raiz, frase)
-            print(f'\n  Árbol guardado: {archivo}')
+    if not todos_errores:
+        print('  ✓  Frase válida — concordancia correcta en género y número.')
+        if dag_sv and dag_sv.get('accion'):
+            sn_suj = sintagmas[0]
+            sujeto = ' '.join(filter(None, [sn_suj.get('det'), sn_suj.get('n')]))
+            print(f'  → Sujeto: "{sujeto}"  |  Acción: "{dag_sv["accion"]}"')
+    else:
+        n = len(todos_errores)
+        print(f'  ✗  {n} error{"es" if n > 1 else ""} detectado{"s" if n > 1 else ""}:\n')
+        for i, err in enumerate(todos_errores, 1):
+            print(f'  Error {i} [{err["tipo"]}]')
+            print(f'    → {err["desc"]}')
+            print(f'    ✦ Sugerencia: {err["sug"]}')
+            if i < len(todos_errores):
+                print()
+
+    print(f'\n{sep}\n')
+    return todos_errores
+
+
+# ============================================================
+# PARTE 10: Interfaz interactiva
+# ============================================================
+
+EJEMPLOS = [
+    ('La niña alto corre',        'del proyecto — error de género'),
+    ('Los perro negro ladra',      'del proyecto — error de número'),
+    ('El gato gris duerme',        'del proyecto — concordancia correcta'),
+    ('Una casa bonita',            'SN simple correcto'),
+    ('Los niños felices juegan',   'plural correcto'),
+    ('La mujer alto come',         'error de género en adjetivo'),
+    ('Un flor rojo',               'error de género en det y adj'),
+    ('Los gato negro corre',       'múltiples errores'),
+    ('La rosa grande corre',       'AMBIGÜEDAD: rosa = N o Adj'),
+    ('El joven alto camina',       'AMBIGÜEDAD: joven = N o Adj'),
+]
+
+def menu():
+    print("""
+╔══════════════════════════════════════════════════════════════╗
+║   CORRECTOR DE CONCORDANCIA DE GÉNERO Y NÚMERO EN ESPAÑOL   ║
+║   Procesamiento de Lenguaje Natural — Univ. del Valle 2026-1║
+║   Cristhian Leonardo Albarracín Zapata · 1968253            ║
+╚══════════════════════════════════════════════════════════════╝
+
+Herramientas: DFA · CFG · Parser recursivo · DCG/Unificación · Árbol · Ambigüedad
+
+Comandos:
+  [e] Ver ejemplos predefinidos
+  [s] Salir
+  O escriba directamente una frase.
+""")
+
+    while True:
+        try:
+            entrada = input('  Frase > ').strip()
+        except (EOFError, KeyboardInterrupt):
+            print('\n  Saliendo...')
+            break
+
+        if not entrada:
+            continue
+        if entrada.lower() == 's':
+            print('  ¡Hasta luego!')
+            break
+        if entrada.lower() == 'e':
+            print('\n  Ejemplos:')
+            for i, (ej, desc) in enumerate(EJEMPLOS, 1):
+                print(f'    {i:>2}. "{ej}"  ({desc})')
+            try:
+                op = input('\n  Número (o Enter para cancelar): ').strip()
+                if op.isdigit() and 1 <= int(op) <= len(EJEMPLOS):
+                    analizar(EJEMPLOS[int(op)-1][0])
+            except (EOFError, KeyboardInterrupt):
+                pass
+            continue
+
+        analizar(entrada)
+
+
+# ============================================================
+# PUNTO DE ENTRADA
+# ============================================================
+
+if __name__ == '__main__':
+    import sys
+
+    if len(sys.argv) > 1:
+        frase = ' '.join(sys.argv[1:])
+        analizar(frase)
+    else:
+        menu()
