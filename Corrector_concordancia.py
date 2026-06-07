@@ -102,6 +102,12 @@ lexico = {
     'pequeñas': {'cat': 'adj', 'gen': 'fem', 'num': 'plur', 'base': 'pequeño'},
     'bonitas':  {'cat': 'adj', 'gen': 'fem', 'num': 'plur', 'base': 'bonito'},
 
+    # ── Palabras con ambigüedad léxica (uso principal: N)
+    'rosa':    {'cat': 'n', 'gen': 'fem',  'num': 'sing'},
+    'naranja': {'cat': 'n', 'gen': 'fem',  'num': 'sing'},
+    'pobre':   {'cat': 'n', 'gen': 'masc', 'num': 'sing'},
+    'joven':   {'cat': 'n', 'gen': 'masc', 'num': 'sing'},
+
     # ── Adjetivos invariables en género (neutros)
     'grande':   {'cat': 'adj', 'gen': 'neutro', 'num': 'sing', 'base': 'grande'},
     'grandes':  {'cat': 'adj', 'gen': 'neutro', 'num': 'plur', 'base': 'grande'},
@@ -114,7 +120,7 @@ lexico = {
     'azul':     {'cat': 'adj', 'gen': 'neutro', 'num': 'sing', 'base': 'azul'},
     'azules':   {'cat': 'adj', 'gen': 'neutro', 'num': 'plur', 'base': 'azul'},
 
-    # ── Verbos
+    # ── Verbos (num para concordancia sujeto-verbo, accion para semántica)
     'corre':    {'cat': 'v', 'num': 'sing', 'accion': 'correr'},
     'corren':   {'cat': 'v', 'num': 'plur', 'accion': 'correr'},
     'ladra':    {'cat': 'v', 'num': 'sing', 'accion': 'ladrar'},
@@ -133,9 +139,55 @@ lexico = {
     'son':      {'cat': 'v', 'num': 'plur', 'accion': 'ser'},
 }
 
+# Tabla de formas correctas para construir sugerencias
+formas_adj = {
+    'alto':    {'masc': {'sing': 'alto',    'plur': 'altos'},
+                'fem':  {'sing': 'alta',    'plur': 'altas'}},
+    'bajo':    {'masc': {'sing': 'bajo',    'plur': 'bajos'},
+                'fem':  {'sing': 'baja',    'plur': 'bajas'}},
+    'negro':   {'masc': {'sing': 'negro',   'plur': 'negros'},
+                'fem':  {'sing': 'negra',   'plur': 'negras'}},
+    'blanco':  {'masc': {'sing': 'blanco',  'plur': 'blancos'},
+                'fem':  {'sing': 'blanca',  'plur': 'blancas'}},
+    'rojo':    {'masc': {'sing': 'rojo',    'plur': 'rojos'},
+                'fem':  {'sing': 'roja',    'plur': 'rojas'}},
+    'pequeño': {'masc': {'sing': 'pequeño', 'plur': 'pequeños'},
+                'fem':  {'sing': 'pequeña', 'plur': 'pequeñas'}},
+    'bonito':  {'masc': {'sing': 'bonito',  'plur': 'bonitos'},
+                'fem':  {'sing': 'bonita',  'plur': 'bonitas'}},
+    'gordo':   {'masc': {'sing': 'gordo',   'plur': 'gordos'},
+                'fem':  {'sing': 'gorda',   'plur': 'gordas'}},
+    'grande':  {'masc': {'sing': 'grande',  'plur': 'grandes'},
+                'fem':  {'sing': 'grande',  'plur': 'grandes'}},
+    'feliz':   {'masc': {'sing': 'feliz',   'plur': 'felices'},
+                'fem':  {'sing': 'feliz',   'plur': 'felices'}},
+    'gris':    {'masc': {'sing': 'gris',    'plur': 'grises'},
+                'fem':  {'sing': 'gris',    'plur': 'grises'}},
+    'verde':   {'masc': {'sing': 'verde',   'plur': 'verdes'},
+                'fem':  {'sing': 'verde',   'plur': 'verdes'}},
+    'azul':    {'masc': {'sing': 'azul',    'plur': 'azules'},
+                'fem':  {'sing': 'azul',    'plur': 'azules'}},
+}
+
+formas_det = {
+    'masc': {'sing': 'el',  'plur': 'los'},
+    'fem':  {'sing': 'la',  'plur': 'las'},
+}
+
 # Función de acceso al léxico (igual que cat() de la profe)
 def rasgo(token):
     return lexico.get(token.lower(), None)
+
+lexico_ambiguo = {
+    'rosa':    [{'cat': 'n', 'gen': 'fem', 'num': 'sing'}, {'cat': 'adj', 'gen': 'neutro', 'num': 'sing', 'base': 'rosa'}],
+    'naranja': [{'cat': 'n', 'gen': 'fem', 'num': 'sing'}, {'cat': 'adj', 'gen': 'neutro', 'num': 'sing', 'base': 'naranja'}],
+    'pobre':   [{'cat': 'n', 'gen': 'masc', 'num': 'sing'}, {'cat': 'adj', 'gen': 'neutro', 'num': 'sing', 'base': 'pobre'}],
+    'joven':   [{'cat': 'n', 'gen': 'masc', 'num': 'sing'}, {'cat': 'adj', 'gen': 'neutro', 'num': 'sing', 'base': 'joven'}],
+}
+
+def rasgo_ambiguo(token):
+    return lexico_ambiguo.get(token.lower(), None)
+
 
 
 # ============================================================
